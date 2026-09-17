@@ -49,6 +49,9 @@ class MainActivity : ComponentActivity() {
     private var summonedBySession = false
     private var sessionEndJob: Job? = null
     private var lastSessionEndedAt = 0L
+    // onNewIntent runs after onRestart/onStart, so lifecycle state can't tell whether
+    // a summon actually brought the activity forward; track leaving the screen instead
+    private var stoppedSinceResume = false
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
@@ -139,7 +142,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (intent.getBooleanExtra(EXTRA_SESSION_SUMMON, false)) {
-            if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            if (stoppedSinceResume) {
                 summonedBySession = true
             }
         } else {
@@ -170,19 +173,34 @@ class MainActivity : ComponentActivity() {
         sessionEndJob?.cancel()
         sessionEndJob = lifecycleScope.launch {
             var wasActive = false
-            combine(svc.videoPlaybackActive, svc.mirroringActive) { video, mirror -> video || mirror }
+            var wasVideo = false
+            // a mirroring stop waits for the sender to disconnect instead of a timer: a real
+            // stop drops every connection within ~100ms, while a hand-off to video playback
+            // keeps them open for several seconds before /play arrives
+            var mirrorEndPending = false
+            combine(svc.videoPlaybackActive, svc.mirroringActive, svc.connectionCount) { video, mirror, conns ->
+                Triple(video, mirror, conns)
+            }
                 .distinctUntilChanged()
-                .collect { active ->
-                    if (!active && wasActive) {
+                .collect { (video, mirror, conns) ->
+                    val active = video || mirror
+                    if (active) {
+                        mirrorEndPending = false
+                    } else if (wasActive) {
                         lastSessionEndedAt = SystemClock.elapsedRealtime()
-                        _onSessionEnded(svc)
+                        if (wasVideo) _onVideoSessionEnded(svc) else mirrorEndPending = true
+                    }
+                    if (mirrorEndPending && conns == 0) {
+                        mirrorEndPending = false
+                        _returnToPreviousApp()
                     }
                     wasActive = active
+                    wasVideo = video
                 }
         }
     }
 
-    private fun _onSessionEnded(svc: AirPlayService) {
+    private fun _onVideoSessionEnded(svc: AirPlayService) {
         if (!summonedBySession || !viewModel.returnToPreviousApp.value || isInPip.value) return
         lifecycleScope.launch {
             // grace period: a sender switching queue items stops one video and plays
@@ -190,10 +208,14 @@ class MainActivity : ComponentActivity() {
             // cancel the step-aside instead of flashing through the previous app
             delay(SESSION_END_RETURN_GRACE_MS)
             if (_sessionActive(svc)) return@launch
-            if (!summonedBySession || isInPip.value) return@launch
-            summonedBySession = false
-            moveTaskToBack(true)
+            _returnToPreviousApp()
         }
+    }
+
+    private fun _returnToPreviousApp() {
+        if (!summonedBySession || !viewModel.returnToPreviousApp.value || isInPip.value) return
+        summonedBySession = false
+        moveTaskToBack(true)
     }
 
     fun enterPip() {
@@ -226,8 +248,14 @@ class MainActivity : ComponentActivity() {
         isInPip.value = inPip
     }
 
+    override fun onResume() {
+        super.onResume()
+        stoppedSinceResume = false
+    }
+
     override fun onStop() {
         super.onStop()
+        stoppedSinceResume = true
         // never stop mid-session
         if (!viewModel.runInBackground.value && !isChangingConfigurations &&
             viewModel.serverState.value == AirPlayService.ServerState.RUNNING &&
