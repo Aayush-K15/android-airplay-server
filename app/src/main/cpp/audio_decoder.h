@@ -343,28 +343,210 @@ private:
     int mChannels;
 };
 
+// builds the 2 or 4 byte AAC AudioSpecificConfig airplay sends as csd-0, and the
+// MediaCodecInfo.CodecProfileLevel AAC profile it corresponds to. shared by the
+// MediaCodec path (startAacCodec) and the ffmpeg software fallback (FfmpegAacDecoder)
+static inline bool buildAacAsc(int ct, int spf, uint8_t out[4], size_t &len, int &profile) {
+    if (ct == CT_AAC_ELD) {
+        // AAC-ELD AudioSpecificConfig: AOT=39, 44100, stereo, then ELDSpecificConfig whose
+        // first bit is frameLengthFlag (byte2 bit3): 1 = 480 samples/frame (0x50), 0 = 512 (0x40)
+        profile = 39; out[0] = 0xF8; out[1] = 0xE8;
+        out[2] = (spf == 512) ? 0x40 : 0x50; out[3] = 0x00; len = 4;
+        return true;
+    }
+    if (ct == CT_AAC_LC) {
+        // AAC-LC AudioSpecificConfig: AOT=2, 44100, stereo, then GASpecificConfig whose
+        // first bit is frameLengthFlag (byte1 bit5): 0 = 1024 samples/frame (0x10), 1 = 960 (0x14)
+        profile = 2; out[0] = 0x12;
+        out[1] = (spf == 960) ? 0x14 : 0x10; len = 2;
+        return true;
+    }
+    return false;
+}
+
+// software AAC (LC/ELD) via ffmpeg libavcodec; mirrors FfmpegAlacDecoder, used when the
+// platform MediaCodec can't init the requested AAC profile (e.g. no ELD support on this device)
+class FfmpegAacDecoder : public Decoder {
+public:
+    // returns nullptr if codec can't be created/opened
+    static std::unique_ptr<FfmpegAacDecoder> make(int ct, int spf, int sampleRate, int channels,
+                                                  TimelineBuffer &timeline, LatencyReporter &lat,
+                                                  LogSink &log) {
+        installFfmpegLogcat();
+        auto dec = std::unique_ptr<FfmpegAacDecoder>(new FfmpegAacDecoder(timeline, lat, log));
+        if (!dec->init(ct, spf, sampleRate, channels)) return nullptr;
+        return dec;
+    }
+
+    ~FfmpegAacDecoder() override {
+        if (mFrame) av_frame_free(&mFrame);
+        if (mPkt) av_packet_free(&mPkt);
+        if (mCtx) avcodec_free_context(&mCtx);
+    }
+
+    bool decode(const uint8_t *data, size_t len, int64_t ptsNs) override {
+        if (len == 0 || len > INT_MAX - AV_INPUT_BUFFER_PADDING_SIZE) return false;
+        const int64_t t0 = monoNs();
+
+        if (mPkt->size < (int)len) {
+            if (av_grow_packet(mPkt, (int)len - mPkt->size) < 0) return false;
+        } else {
+            av_shrink_packet(mPkt, (int)len);
+        }
+        memcpy(mPkt->data, data, len);
+
+        if (avcodec_send_packet(mCtx, mPkt) < 0) return false;
+
+        int64_t pts = ptsNs;
+        while (avcodec_receive_frame(mCtx, mFrame) == 0) {
+            const int n = mFrame->nb_samples;
+            if (n <= 0) continue;
+            if (mPcm.size() < (size_t)n * mChannels) mPcm.resize((size_t)n * mChannels);
+            if (!interleaveToS16(mFrame, n)) {
+                mLog.error("ffmpeg AAC: unsupported sample format %d", mFrame->format);
+                return false;
+            }
+            mTimeline.write(mPcm.data(), (size_t)n * mChannels, pts);
+            pts += (int64_t)n * NS_PER_SEC / mCtx->sample_rate;
+        }
+
+        mLat.record(monoNs() - t0);
+        mLat.setHeld(0);
+        return true;
+    }
+
+private:
+    FfmpegAacDecoder(TimelineBuffer &timeline, LatencyReporter &lat, LogSink &log)
+        : mTimeline(timeline), mLat(lat), mLog(log) {}
+
+    static inline int16_t clampToS16(float v) {
+        const float scaled = v * 32768.0f;
+        return (int16_t)(scaled > 32767.0f ? 32767 : (scaled < -32768.0f ? -32768 : scaled));
+    }
+
+    // ffmpeg's native AAC decoder outputs float; convert whatever it hands back to
+    // packed S16 in mPcm. returns false for a format this fallback doesn't handle.
+    bool interleaveToS16(const AVFrame *f, int n) {
+        switch (f->format) {
+            case AV_SAMPLE_FMT_S16:
+                memcpy(mPcm.data(), f->data[0], (size_t)n * mChannels * sizeof(int16_t));
+                return true;
+            case AV_SAMPLE_FMT_S16P:
+                for (int c = 0; c < mChannels; c++) {
+                    const int16_t *p = (const int16_t *)f->data[c];
+                    for (int i = 0; i < n; i++) mPcm[(size_t)i * mChannels + c] = p[i];
+                }
+                return true;
+            case AV_SAMPLE_FMT_FLT: {
+                const float *p = (const float *)f->data[0];
+                for (int i = 0; i < n * mChannels; i++) mPcm[i] = clampToS16(p[i]);
+                return true;
+            }
+            case AV_SAMPLE_FMT_FLTP:
+                for (int c = 0; c < mChannels; c++) {
+                    const float *p = (const float *)f->data[c];
+                    for (int i = 0; i < n; i++) mPcm[(size_t)i * mChannels + c] = clampToS16(p[i]);
+                }
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    bool init(int ct, int spf, int sampleRate, int channels) {
+        const AVCodec *codec = avcodec_find_decoder(AV_CODEC_ID_AAC);
+        if (!codec) { mLog.error("ffmpeg AAC decoder not compiled in"); return false; }
+        mCtx = avcodec_alloc_context3(codec);
+        if (!mCtx) return false;
+
+        uint8_t asc[4]; size_t ascLen; int profile;
+        if (!buildAacAsc(ct, spf, asc, ascLen, profile)) return false;
+
+        mCtx->extradata = (uint8_t *)av_mallocz(ascLen + AV_INPUT_BUFFER_PADDING_SIZE);
+        if (!mCtx->extradata) return false;
+        memcpy(mCtx->extradata, asc, ascLen);
+        mCtx->extradata_size = (int)ascLen;
+
+        mCtx->sample_rate = sampleRate;
+        av_channel_layout_default(&mCtx->ch_layout, channels);
+        mCtx->thread_count = 1;
+
+        if (avcodec_open2(mCtx, codec, nullptr) < 0) {
+            mLog.error("ffmpeg AAC open failed (ct=%d rate=%d ch=%d spf=%d)", ct, sampleRate, channels, spf);
+            return false;
+        }
+
+        mPkt = av_packet_alloc();
+        mFrame = av_frame_alloc();
+        if (!mPkt || !mFrame) return false;
+        // AAC packets from airplay are small (one ELD/LC frame); pad generously
+        if (av_new_packet(mPkt, spf * channels * (int)sizeof(int16_t) + 64) < 0) return false;
+        mChannels = channels;
+        mPcm.resize((size_t)spf * channels);
+        return true;
+    }
+
+    AVCodecContext *mCtx = nullptr;  // owned
+    AVPacket *mPkt = nullptr;        // owned
+    AVFrame *mFrame = nullptr;       // owned
+    std::vector<int16_t> mPcm;       // interleave/convert scratch
+    TimelineBuffer &mTimeline;
+    LatencyReporter &mLat;
+    LogSink &mLog;
+    int mChannels;
+};
+
+// media_status_t -> readable name for logging (only the values configure()/start() can return)
+static inline const char *mediaStatusName(media_status_t s) {
+    switch (s) {
+        case AMEDIA_OK: return "OK";
+        case AMEDIA_ERROR_UNKNOWN: return "ERROR_UNKNOWN";
+        case AMEDIA_ERROR_MALFORMED: return "ERROR_MALFORMED";
+        case AMEDIA_ERROR_UNSUPPORTED: return "ERROR_UNSUPPORTED";
+        case AMEDIA_ERROR_INVALID_OBJECT: return "ERROR_INVALID_OBJECT";
+        case AMEDIA_ERROR_INVALID_PARAMETER: return "ERROR_INVALID_PARAMETER";
+        case AMEDIA_ERROR_INVALID_OPERATION: return "ERROR_INVALID_OPERATION";
+        case AMEDIACODEC_ERROR_INSUFFICIENT_RESOURCE: return "INSUFFICIENT_RESOURCE";
+        case AMEDIACODEC_ERROR_RECLAIMED: return "RECLAIMED";
+        default: return "?";
+    }
+}
+
+// one candidate attempt: create-by-name (or by-type if name is null), configure, start.
+// logs exactly which step failed and with what status so init failures are diagnosable
+static inline AMediaCodec *tryStartCodec(const char *mime, const char *name, AMediaFormat *fmt,
+                                         LogSink &log) {
+    AMediaCodec *codec = name ? AMediaCodec_createCodecByName(name) : AMediaCodec_createDecoderByType(mime);
+    const char *label = name ? name : "default";
+    if (!codec) {
+        log.error("%s decoder create failed (%s)", mime, label);
+        return nullptr;
+    }
+    media_status_t st = AMediaCodec_configure(codec, fmt, nullptr, nullptr, 0);
+    if (st != AMEDIA_OK) {
+        log.error("%s decoder configure failed (%s): %s (%d)", mime, label, mediaStatusName(st), (int)st);
+        AMediaCodec_delete(codec);
+        return nullptr;
+    }
+    st = AMediaCodec_start(codec);
+    if (st != AMEDIA_OK) {
+        log.error("%s decoder start failed (%s): %s (%d)", mime, label, mediaStatusName(st), (int)st);
+        AMediaCodec_delete(codec);
+        return nullptr;
+    }
+    log.info("%s decoder started (%s)", mime, label);
+    return codec;
+}
+
 // ---- decoder factories ----
 // create + configure + start AMediaCodec for `mime` with `fmt` (consumes fmt); tries
 // `preferName` first if set, falls back to platform default; nullptr if none start
 static inline AMediaCodec *startCodec(const char *mime, const char *preferName, AMediaFormat *fmt,
                                       LogSink &log) {
-    AMediaCodec *codec = preferName ? AMediaCodec_createCodecByName(preferName) : nullptr;
-    bool ok = codec &&
-              AMediaCodec_configure(codec, fmt, nullptr, nullptr, 0) == AMEDIA_OK &&
-              AMediaCodec_start(codec) == AMEDIA_OK;
-    if (ok) {
-        log.info("%s decoder started (%s)", mime, preferName);
-    } else {
-        if (codec) { AMediaCodec_delete(codec); codec = nullptr; }
-        codec = AMediaCodec_createDecoderByType(mime);
-        ok = codec &&
-             AMediaCodec_configure(codec, fmt, nullptr, nullptr, 0) == AMEDIA_OK &&
-             AMediaCodec_start(codec) == AMEDIA_OK;
-        if (ok) log.info("%s decoder started (default)", mime);
-    }
+    AMediaCodec *codec = preferName ? tryStartCodec(mime, preferName, fmt, log) : nullptr;
+    if (!codec) codec = tryStartCodec(mime, nullptr, fmt, log);
     AMediaFormat_delete(fmt);
-    if (!ok && codec) { AMediaCodec_delete(codec); codec = nullptr; }
-    return ok ? codec : nullptr;
+    return codec;
 }
 
 // default AAC decoder runs sandboxed on newer devices; sandbox IPC costs ~15-30ms
@@ -380,17 +562,7 @@ static inline void setSchedulingHints(AMediaFormat *fmt, bool realtimePriority, 
 static inline AMediaCodec *startAacCodec(int ct, int spf, int sampleRate, int channels, LogSink &log,
                                          bool realtimePriority, bool lowLatency) {
     uint8_t csd[4]; size_t csdLen; int profile;
-    if (ct == CT_AAC_ELD) {
-        // AAC-ELD AudioSpecificConfig: AOT=39, 44100, stereo, then ELDSpecificConfig whose
-        // first bit is frameLengthFlag (byte2 bit3): 1 = 480 samples/frame (0x50), 0 = 512 (0x40)
-        profile = 39; csd[0] = 0xF8; csd[1] = 0xE8;
-        csd[2] = (spf == 512) ? 0x40 : 0x50; csd[3] = 0x00; csdLen = 4;
-    } else if (ct == CT_AAC_LC) {
-        // AAC-LC AudioSpecificConfig: AOT=2, 44100, stereo, then GASpecificConfig whose
-        // first bit is frameLengthFlag (byte1 bit5): 0 = 1024 samples/frame (0x10), 1 = 960 (0x14)
-        profile = 2; csd[0] = 0x12;
-        csd[1] = (spf == 960) ? 0x14 : 0x10; csdLen = 2;
-    } else {
+    if (!buildAacAsc(ct, spf, csd, csdLen, profile)) {
         log.error("Unknown audio ct=%d", ct); return nullptr;
     }
     AMediaFormat *fmt = AMediaFormat_new();
@@ -438,9 +610,15 @@ static inline std::unique_ptr<Decoder> makeDecoder(int ct, int spf, int sampleRa
     }
     if (AMediaCodec *codec = startAacCodec(ct, spf, sampleRate, channels, log,
                                            realtimePriority, lowLatency)) {
+        log.info("AAC: hardware decoder (ct=%d)", ct);
         return std::make_unique<MediaCodecDecoder>(codec, timeline, lat);
     }
     log.error("AAC codec init failed (ct=%d)", ct);
+    if (auto sw = FfmpegAacDecoder::make(ct, spf, sampleRate, channels, timeline, lat, log)) {
+        log.info("AAC: software decoder (ffmpeg) (ct=%d)", ct);
+        return sw;
+    }
+    log.error("AAC init failed (hw and sw, ct=%d)", ct);
     return nullptr;
 }
 
