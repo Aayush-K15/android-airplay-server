@@ -51,6 +51,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
     val overscanned by viewModel.overscanned.collectAsState()
     val requirePin by viewModel.requirePin.collectAsState()
     val allowNewConn by viewModel.allowNewConn.collectAsState()
+    val usbOnly by viewModel.usbOnly.collectAsState()
     val autoStart by viewModel.autoStart.collectAsState()
     val bootAutoStart by viewModel.bootAutoStart.collectAsState()
     val runInBackground by viewModel.runInBackground.collectAsState()
@@ -106,6 +107,17 @@ fun SettingsScreen(viewModel: MainViewModel) {
         )
 
         SectionHeader(stringResource(R.string.section_connection))
+
+        SettingSegmented(
+            title = stringResource(R.string.setting_discovery),
+            summary = stringResource(if (usbOnly) R.string.setting_discovery_usb_desc else R.string.setting_discovery_all_desc),
+            value = usbOnly,
+            options = listOf(
+                false to stringResource(R.string.chip_all_networks),
+                true to stringResource(R.string.chip_usb_only),
+            ),
+            onValueChange = { viewModel.setUsbOnly(it) }
+        )
 
         SettingSwitch(
             title = stringResource(R.string.setting_require_pin),
@@ -636,6 +648,38 @@ private fun SettingChips(
                 Text(description)
                 Spacer(Modifier.height(8.dp))
                 ChipRow(value, options, onValueChange)
+            }
+        }
+    )
+}
+
+@Composable
+private fun <T> SettingSegmented(
+    title: String,
+    summary: String,
+    value: T,
+    options: List<Pair<T, String>>,
+    onValueChange: (T) -> Unit
+) {
+    ListItem(
+        headlineContent = { Text(title) },
+        supportingContent = {
+            Column {
+                Spacer(Modifier.height(8.dp))
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    options.forEachIndexed { i, (key, label) ->
+                        val shape = SegmentedButtonDefaults.itemShape(i, options.size)
+                        SegmentedButton(
+                            selected = value == key,
+                            onClick = { onValueChange(key) },
+                            shape = shape,
+                            modifier = Modifier.dpadFocus(shape),
+                            label = { Text(label) }
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(summary)
             }
         }
     )

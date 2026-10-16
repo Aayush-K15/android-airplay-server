@@ -170,6 +170,9 @@ class MainViewModel @Inject constructor(app: Application) : AndroidViewModel(app
     private val _allowNewConn = MutableStateFlow(prefs.getBoolean(Prefs.ALLOW_NEW_CONN, Prefs.DEF_ALLOW_NEW_CONN))
     val allowNewConn: StateFlow<Boolean> = _allowNewConn.asStateFlow()
 
+    private val _usbOnly = MutableStateFlow(prefs.getBoolean(Prefs.USB_ONLY, Prefs.DEF_USB_ONLY))
+    val usbOnly: StateFlow<Boolean> = _usbOnly.asStateFlow()
+
     private val _audioLatencyMs = MutableStateFlow(prefs.getInt(Prefs.AUDIO_LATENCY_MS, Prefs.DEF_AUDIO_LATENCY_MS))
     val audioLatencyMs: StateFlow<Int> = _audioLatencyMs.asStateFlow()
 
@@ -405,6 +408,7 @@ class MainViewModel @Inject constructor(app: Application) : AndroidViewModel(app
     fun setOverscanned(v: Boolean) { _overscanned.value = v; prefs.edit().putBoolean(Prefs.OVERSCANNED, v).apply(); _applyByServerRestart() }
     fun setRequirePin(v: Boolean) { _requirePin.value = v; prefs.edit().putBoolean(Prefs.REQUIRE_PIN, v).apply(); _applyByServerRestart() }
     fun setAllowNewConn(v: Boolean) { _allowNewConn.value = v; prefs.edit().putBoolean(Prefs.ALLOW_NEW_CONN, v).apply(); _applyByServerRestart() }
+    fun setUsbOnly(v: Boolean) { _usbOnly.value = v; prefs.edit().putBoolean(Prefs.USB_ONLY, v).apply(); _applyByServerRestart() }
     fun setAudioLatencyMs(v: Int) { _audioLatencyMs.value = v; prefs.edit().putInt(Prefs.AUDIO_LATENCY_MS, v).apply(); _applyByServerRestart() }
     fun setIdlePreview(v: Boolean) { _idlePreview.value = v; prefs.edit().putBoolean(Prefs.IDLE_PREVIEW, v).apply() }
     fun setAutoFullscreen(v: Boolean) { _autoFullscreen.value = v; prefs.edit().putBoolean(Prefs.AUTO_FULLSCREEN, v).apply() }

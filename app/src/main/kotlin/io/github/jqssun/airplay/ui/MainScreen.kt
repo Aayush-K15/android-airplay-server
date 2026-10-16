@@ -535,7 +535,7 @@ fun MainScreen(
                 }
             }
         ) { padding ->
-            Box(modifier = Modifier.padding(padding)) {
+            Box(modifier = Modifier.padding(padding).consumeWindowInsets(padding)) {
                 TabContent(
                     tab, viewModel, video,
                     onFullscreen = { fullscreen = true }, onPip = onPip, onLocalNetwork = onLocalNetwork,

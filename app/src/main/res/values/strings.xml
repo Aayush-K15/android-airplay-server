@@ -117,6 +117,11 @@
     <string name="setting_launch_on_connect">Open this application on connect</string>
     <string name="setting_launch_on_connect_desc">Show the screen when a client connects</string>
     <string name="setting_launch_on_connect_no_permission">Tap to grant Display over other apps permission</string>
+    <string name="setting_discovery">Discoverable over</string>
+    <string name="setting_discovery_all_desc">Advertise on all usable interfaces. Uses NsdManager.</string>
+    <string name="setting_discovery_usb_desc">Only advertise over USB tethering to enforce wired connection. Uses custom mDNS responder.</string>
+    <string name="chip_all_networks">All networks</string>
+    <string name="chip_usb_only">USB only</string>
     <string name="setting_resolution">Resolution</string>
     <string name="setting_resolution_desc">Video resolution advertised to clients</string>
     <string name="setting_resolution_placeholder">[W]x[H]</string>

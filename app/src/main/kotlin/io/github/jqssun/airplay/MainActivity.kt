@@ -71,7 +71,7 @@ class MainActivity : ComponentActivity() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !_granted(Manifest.permission.POST_NOTIFICATIONS)) {
                 add(Manifest.permission.POST_NOTIFICATIONS)
             }
-            if (!_hasLocalNetwork()) add(Manifest.permission.ACCESS_LOCAL_NETWORK)
+            if (!hasLocalNetwork()) add(Manifest.permission.ACCESS_LOCAL_NETWORK)
         }
         if (missing.isNotEmpty()) permissions.launch(missing.toTypedArray())
 
@@ -127,12 +127,9 @@ class MainActivity : ComponentActivity() {
     private fun _granted(permission: String) =
         ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
 
-    private fun _hasLocalNetwork() = Build.VERSION.SDK_INT < Build.VERSION_CODES.CINNAMON_BUN ||
-        _granted(Manifest.permission.ACCESS_LOCAL_NETWORK)
-
     private fun _autoStart() {
         val svc = service ?: return
-        if (viewModel.autoStart.value && svc.serverState.value == AirPlayService.ServerState.STOPPED && _hasLocalNetwork()) {
+        if (viewModel.autoStart.value && svc.serverState.value == AirPlayService.ServerState.STOPPED && hasLocalNetwork()) {
             viewModel.startServer()
         }
     }
@@ -148,7 +145,7 @@ class MainActivity : ComponentActivity() {
         val p = Manifest.permission.ACCESS_LOCAL_NETWORK
         val prev = viewModel.localNetwork.value
         val now = when {
-            _granted(p) -> LocalNetworkAccess.GRANTED
+            hasLocalNetwork() -> LocalNetworkAccess.GRANTED
             shouldShowRequestPermissionRationale(p) -> LocalNetworkAccess.ASK
             requested || prev == LocalNetworkAccess.SETTINGS -> LocalNetworkAccess.SETTINGS
             else -> LocalNetworkAccess.ASK

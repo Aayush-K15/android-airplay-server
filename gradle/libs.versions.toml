@@ -1,6 +1,5 @@
 [versions]
 agp = "9.4.1"
-# must match the kotlin gradle plugin agp depends on (built-in kotlin)
 kotlin = "2.2.10"
 ksp = "2.3.12"
 compose-bom = "2024.12.01"

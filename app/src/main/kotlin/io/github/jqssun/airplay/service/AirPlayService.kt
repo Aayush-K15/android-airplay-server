@@ -34,6 +34,7 @@ import androidx.media.app.NotificationCompat as MediaNotificationCompat
 import io.github.jqssun.airplay.MainActivity
 import io.github.jqssun.airplay.Prefs
 import io.github.jqssun.airplay.R
+import io.github.jqssun.airplay.hasLocalNetwork
 import io.github.jqssun.airplay.realDisplaySize
 import io.github.jqssun.airplay.audio.DacpController
 import io.github.jqssun.airplay.audio.DacpPlayer
@@ -45,6 +46,7 @@ import io.github.jqssun.airplay.bridge.NativeBridge
 import io.github.jqssun.airplay.bridge.RaopCallbackHandler
 import io.github.jqssun.airplay.discovery.MdnsService
 import io.github.jqssun.airplay.discovery.NsdServiceManager
+import io.github.jqssun.airplay.discovery.UsbMdnsAdvertiser
 import io.github.jqssun.airplay.download.VideoDownloader
 import io.github.jqssun.airplay.renderer.AirPlayVideoPlayer
 import io.github.jqssun.airplay.renderer.AudioRenderer
@@ -72,6 +74,7 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
 
     private var nativeHandle = 0L
     private var nsdManager: NsdServiceManager? = null
+    private var usbAdvertiser: UsbMdnsAdvertiser? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var foregroundStarted = false
     private var lastOrientation = Configuration.ORIENTATION_UNDEFINED
@@ -346,6 +349,11 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
 
     private fun startServer(name: String, ensureServiceStarted: Boolean) {
         if (_serverState.value == ServerState.RUNNING) return
+        if (!hasLocalNetwork()) {
+            log("Local network permission denied")
+            _failStart()
+            return
+        }
         val effectiveName = name.ifBlank { Prefs.DEF_SERVER_NAME }
 
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -430,12 +438,12 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
             if (advertiseAudio) add(MdnsService(raopName, "_raop._tcp", port, raopTxt))
             add(MdnsService(resolvedName, "_airplay._tcp", port, airplayTxt))
         }
-        try {
+        if (prefs.getBoolean(Prefs.USB_ONLY, Prefs.DEF_USB_ONLY)) {
+            usbAdvertiser = UsbMdnsAdvertiser(services) { iface, addr ->
+                log(if (iface == null) "USB link down" else "USB link up on $iface (${addr?.hostAddress})")
+            }.apply { start() }
+        } else {
             nsdManager?.register(services)
-        } catch (_: SecurityException) {
-            log("Local network permission denied")
-            _failStart()
-            return
         }
 
         _serverState.value = ServerState.RUNNING
@@ -504,6 +512,8 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
             nativeHandle = 0L
         }
         dacpController?.reset()
+        usbAdvertiser?.stop()
+        usbAdvertiser = null
         nsdManager?.release()
         nsdManager = null
         wakeLock?.release()

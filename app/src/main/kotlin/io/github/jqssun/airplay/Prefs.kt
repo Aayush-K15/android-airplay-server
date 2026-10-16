@@ -2,7 +2,6 @@ package io.github.jqssun.airplay
 
 import android.media.MediaFormat
 
-/** Centralized preference keys and defaults. */
 object Prefs {
     const val NAME = "settings"
     const val AUTO = "auto"; const val ON = "on"; const val OFF = "off"
@@ -46,4 +45,5 @@ object Prefs {
     const val ADVERTISE_VIDEO = "advertise_video"; const val DEF_ADVERTISE_VIDEO = true
     const val ADVERTISE_AUDIO = "advertise_audio"; const val DEF_ADVERTISE_AUDIO = true
     const val LAUNCH_ON_CONNECT = "launch_on_connect"; const val DEF_LAUNCH_ON_CONNECT = true
+    const val USB_ONLY = "usb_only"; const val DEF_USB_ONLY = false
 }
