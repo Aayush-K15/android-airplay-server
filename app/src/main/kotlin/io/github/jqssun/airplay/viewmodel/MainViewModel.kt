@@ -28,6 +28,8 @@ import java.util.Date
 import java.util.Locale
 import javax.inject.Inject
 
+enum class LocalNetworkAccess { GRANTED, ASK, SETTINGS }
+
 data class AudioDebug(
     val backlogMs: Int,
     val tunedCushionMs: Int,
@@ -210,6 +212,10 @@ class MainViewModel @Inject constructor(app: Application) : AndroidViewModel(app
 
     private val _debugInfo = MutableStateFlow(DebugInfo())
     val debugInfo: StateFlow<DebugInfo> = _debugInfo.asStateFlow()
+
+    private val _localNetwork = MutableStateFlow(LocalNetworkAccess.GRANTED)
+    val localNetwork: StateFlow<LocalNetworkAccess> = _localNetwork.asStateFlow()
+    fun setLocalNetwork(v: LocalNetworkAccess) { _localNetwork.value = v }
 
     // audio mode
     private val _audioOnly = MutableStateFlow(false)

@@ -32,6 +32,7 @@ A fully featured free and open-source implementation of AirPlay for Android that
 - Audio latency control and support for software decoder fallback
 - Debug overlay with real-time statistics (FPS, bitrate, codec, resolution, frame count, audio volume, etc.)
 - Android native media session integration with notification controls
+- Wired secondary display for macOS/iPadOS devices over USB tethering
 
 > [!WARNING]
 > DRM content (e.g. from the Apple TV application) is not supported.
@@ -39,6 +40,12 @@ A fully featured free and open-source implementation of AirPlay for Android that
 ## Implementation
 
 This application uses the C-based [UxPlay](https://github.com/FDH2/UxPlay) library to implement the AirPlay/RAOP protocol, with a JNI bridge to the Android application layer. Audio can be decoded via MediaCodec or a software ALAC decoder, while mirroring video is decoded via MediaCodec and rendered to a SurfaceView. HLS sessions are served through a local playlist proxy.
+
+When using USB tethering, the Android device can act as a reliable secondary display over a wired connection. Apple devices natively support USB tethering over CDC-NCM, so on Android devices that default to RNDIS, you may need to switch to CDC-NCM over `adb`:
+
+```bash
+adb shell settings put global tether_force_usb_functions 1
+```
 
 ```mermaid
 flowchart LR

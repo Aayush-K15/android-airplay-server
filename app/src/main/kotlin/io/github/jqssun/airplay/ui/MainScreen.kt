@@ -41,6 +41,7 @@ import androidx.compose.ui.layout.ContentScale
 import android.content.Context
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
@@ -61,6 +62,7 @@ import io.github.jqssun.airplay.ui.gestures.VolumeAndBrightnessGestureState
 import io.github.jqssun.airplay.ui.gestures.VolumeState
 import io.github.jqssun.airplay.ui.gestures.ZoomState
 import io.github.jqssun.airplay.viewmodel.DebugInfo
+import io.github.jqssun.airplay.viewmodel.LocalNetworkAccess
 import io.github.jqssun.airplay.viewmodel.MainViewModel
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -88,7 +90,8 @@ fun MainScreen(
     isInPip: Boolean = false,
     onSurfaceAvailable: (android.view.Surface) -> Unit,
     onSurfaceDestroyed: (android.view.Surface) -> Unit,
-    onPip: () -> Unit = {}
+    onPip: () -> Unit = {},
+    onLocalNetwork: () -> Unit = {}
 ) {
     var tab by remember { mutableStateOf(Tab.OVERVIEW) }
     var fullscreen by remember { mutableStateOf(false) }
@@ -535,7 +538,8 @@ fun MainScreen(
             Box(modifier = Modifier.padding(padding)) {
                 TabContent(
                     tab, viewModel, video,
-                    onFullscreen = { fullscreen = true }, onPip = onPip, showAudioMode = audioOnly
+                    onFullscreen = { fullscreen = true }, onPip = onPip, onLocalNetwork = onLocalNetwork,
+                    showAudioMode = audioOnly
                 )
             }
         }
@@ -569,12 +573,13 @@ private fun TabContent(
     video: @Composable () -> Unit,
     onFullscreen: () -> Unit,
     onPip: () -> Unit,
+    onLocalNetwork: () -> Unit,
     showAudioMode: Boolean
 ) {
     when (tab) {
         Tab.OVERVIEW -> OverviewContent(
             viewModel, video,
-            onFullscreen = onFullscreen, onPip = onPip, showAudioMode = showAudioMode
+            onFullscreen = onFullscreen, onPip = onPip, onLocalNetwork = onLocalNetwork, showAudioMode = showAudioMode
         )
         Tab.LOGS -> LogsScreen(viewModel)
         Tab.SETTINGS -> SettingsScreen(viewModel)
@@ -587,9 +592,12 @@ private fun OverviewContent(
     video: @Composable () -> Unit,
     onFullscreen: () -> Unit,
     onPip: () -> Unit,
+    onLocalNetwork: () -> Unit,
     showAudioMode: Boolean = false
 ) {
     val state by viewModel.serverState.collectAsState()
+    val localNetwork by viewModel.localNetwork.collectAsState()
+    val grant = state != ServerState.RUNNING && localNetwork != LocalNetworkAccess.GRANTED
     val connections by viewModel.connectionCount.collectAsState()
     val serverName by viewModel.serverName.collectAsState()
     val videoResolution by viewModel.videoResolution.collectAsState()
@@ -633,13 +641,15 @@ private fun OverviewContent(
                         )
                         Spacer(Modifier.height(12.dp))
                         Text(
-                            text = when (state) {
+                            text = if (grant) stringResource(R.string.local_network_desc) else when (state) {
                                 ServerState.STOPPED -> stringResource(R.string.server_stopped)
                                 ServerState.RUNNING -> stringResource(R.string.waiting_for_connection)
                                 ServerState.ERROR -> stringResource(R.string.error_starting_server)
                             },
                             style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 24.dp)
                         )
                     }
                 } else if (connecting) {
@@ -712,14 +722,14 @@ private fun OverviewContent(
                         )
                         Spacer(Modifier.height(2.dp))
                         val statusColor by animateColorAsState(
-                            when (state) {
+                            if (grant) MaterialTheme.colorScheme.error else when (state) {
                                 ServerState.RUNNING -> MaterialTheme.colorScheme.primary
                                 ServerState.ERROR -> MaterialTheme.colorScheme.error
                                 ServerState.STOPPED -> MaterialTheme.colorScheme.onSurfaceVariant
                             }, label = "status"
                         )
                         Text(
-                            text = when (state) {
+                            text = if (grant) stringResource(R.string.local_network_label) else when (state) {
                                 ServerState.RUNNING -> stringResource(R.string.connected_count, connections)
                                 ServerState.ERROR -> stringResource(R.string.error_label)
                                 ServerState.STOPPED -> stringResource(R.string.stopped_label)
@@ -729,20 +739,27 @@ private fun OverviewContent(
                         )
                     }
 
+                    val settings = localNetwork == LocalNetworkAccess.SETTINGS
+                    val (icon, label, action) = when {
+                        grant -> Triple(
+                            if (settings) Icons.Default.Settings else Icons.Default.LockOpen,
+                            if (settings) R.string.btn_open_settings else R.string.btn_allow,
+                            onLocalNetwork
+                        )
+                        state == ServerState.RUNNING -> Triple(Icons.Default.Stop, R.string.btn_stop, viewModel::stopServer)
+                        else -> Triple(Icons.Default.PlayArrow, R.string.btn_start, viewModel::startServer)
+                    }
                     FilledTonalButton(
-                        onClick = {
-                            if (state == ServerState.RUNNING) viewModel.stopServer()
-                            else viewModel.startServer()
-                        },
+                        onClick = action,
                         modifier = Modifier.dpadFocus().focusRequester(startFocus)
                     ) {
                         Icon(
-                            imageVector = if (state == ServerState.RUNNING) Icons.Default.Stop else Icons.Default.PlayArrow,
+                            imageVector = icon,
                             contentDescription = null,
                             modifier = Modifier.size(20.dp)
                         )
                         Spacer(Modifier.width(6.dp))
-                        Text(if (state == ServerState.RUNNING) stringResource(R.string.btn_stop) else stringResource(R.string.btn_start))
+                        Text(stringResource(label))
                     }
                 }
             }

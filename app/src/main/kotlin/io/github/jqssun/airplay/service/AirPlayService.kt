@@ -43,6 +43,7 @@ import io.github.jqssun.airplay.audio.VolumeBroadcast
 import io.github.jqssun.airplay.bridge.LogListener
 import io.github.jqssun.airplay.bridge.NativeBridge
 import io.github.jqssun.airplay.bridge.RaopCallbackHandler
+import io.github.jqssun.airplay.discovery.MdnsService
 import io.github.jqssun.airplay.discovery.NsdServiceManager
 import io.github.jqssun.airplay.download.VideoDownloader
 import io.github.jqssun.airplay.renderer.AirPlayVideoPlayer
@@ -425,10 +426,17 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         val raopName = NativeBridge.nativeGetRaopServiceName(nativeHandle) ?: "AirPlay"
         val resolvedName = NativeBridge.nativeGetServerName(nativeHandle) ?: effectiveName
 
-        if (prefs.getBoolean(Prefs.ADVERTISE_AUDIO, Prefs.DEF_ADVERTISE_AUDIO)) {
-            nsdManager?.registerRaop(raopName, port, raopTxt)
+        val services = buildList {
+            if (advertiseAudio) add(MdnsService(raopName, "_raop._tcp", port, raopTxt))
+            add(MdnsService(resolvedName, "_airplay._tcp", port, airplayTxt))
         }
-        nsdManager?.registerAirplay(resolvedName, port, airplayTxt)
+        try {
+            nsdManager?.register(services)
+        } catch (_: SecurityException) {
+            log("Local network permission denied")
+            _failStart()
+            return
+        }
 
         _serverState.value = ServerState.RUNNING
         if (ensureServiceStarted) {
