@@ -1,6 +1,9 @@
 package io.github.jqssun.airplay.bridge
 
 object NativeBridge {
+    const val FT_MIRROR = 7
+    const val FT_AUDIO = 9
+
     init {
         System.loadLibrary("airplay_native")
     }
@@ -24,7 +27,7 @@ object NativeBridge {
     external fun nativeSetCodecs(handle: Long, alac: Boolean, aac: Boolean)
     external fun nativeSetHlsEnabled(handle: Long, enabled: Boolean)
     external fun nativeSetLang(handle: Long, requested: String, subtitles: String, system: String)
-    external fun nativeSetAudioEnabled(handle: Long, enabled: Boolean)
+    external fun nativeSetFeature(handle: Long, bit: Int, enabled: Boolean)
     external fun nativeUpdatePlaybackInfo(
         handle: Long, position: Float, duration: Float, rate: Float, readyToPlay: Boolean
     )

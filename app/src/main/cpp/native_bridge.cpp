@@ -332,15 +332,14 @@ Java_io_github_jqssun_airplay_bridge_NativeBridge_nativeSetLang(
     raop_set_lang(ctx->raop, ctx->lang_requested.c_str(), ctx->lang_subtitles.c_str(), ctx->lang_system.c_str());
 }
 
-/* feature bit 9 advertises audio support over dns-sd */
 extern "C"
 JNIEXPORT void JNICALL
-Java_io_github_jqssun_airplay_bridge_NativeBridge_nativeSetAudioEnabled(
-        JNIEnv *env, jobject thiz, jlong handle, jboolean enabled) {
+Java_io_github_jqssun_airplay_bridge_NativeBridge_nativeSetFeature(
+        JNIEnv *env, jobject thiz, jlong handle, jint bit, jboolean enabled) {
 
     server_ctx_t *ctx = (server_ctx_t *)(intptr_t)handle;
     if (!ctx || !ctx->dnssd) return;
-    dnssd_set_airplay_features(ctx->dnssd, 9, enabled ? 1 : 0);
+    dnssd_set_airplay_features(ctx->dnssd, bit, enabled ? 1 : 0);
 }
 
 extern "C"

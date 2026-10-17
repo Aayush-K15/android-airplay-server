@@ -45,6 +45,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
     val autoFullscreen by viewModel.autoFullscreen.collectAsState()
     val keepScreenOn by viewModel.keepScreenOn.collectAsState()
     val advertiseVideo by viewModel.advertiseVideo.collectAsState()
+    val advertiseMirroring by viewModel.advertiseMirroring.collectAsState()
     val advertiseAudio by viewModel.advertiseAudio.collectAsState()
     val launchOnConnect by viewModel.launchOnConnect.collectAsState()
     val maxFps by viewModel.maxFps.collectAsState()
@@ -250,6 +251,13 @@ fun SettingsScreen(viewModel: MainViewModel) {
                 description = stringResource(R.string.setting_advertise_video_desc),
                 checked = advertiseVideo,
                 onCheckedChange = { viewModel.setAdvertiseVideo(it) }
+            )
+
+            SettingSwitch(
+                title = stringResource(R.string.setting_advertise_mirroring),
+                description = stringResource(R.string.setting_advertise_mirroring_desc),
+                checked = advertiseMirroring,
+                onCheckedChange = { viewModel.setAdvertiseMirroring(it) }
             )
 
             SettingSwitch(
