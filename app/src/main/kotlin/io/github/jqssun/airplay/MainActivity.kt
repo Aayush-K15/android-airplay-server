@@ -88,7 +88,7 @@ class MainActivity : ComponentActivity() {
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                combine(viewModel.keepScreenOn, viewModel.connectionCount) { keep, conns ->
+                combine(viewModel.pref(Prefs.KEEP_SCREEN_ON), viewModel.connectionCount) { keep, conns ->
                     keep && conns > 0
                 }.collect { on ->
                     if (on) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -129,7 +129,7 @@ class MainActivity : ComponentActivity() {
 
     private fun _autoStart() {
         val svc = service ?: return
-        if (viewModel.autoStart.value && svc.serverState.value == AirPlayService.ServerState.STOPPED && hasLocalNetwork()) {
+        if (viewModel.pref(Prefs.AUTO_START).value && svc.serverState.value == AirPlayService.ServerState.STOPPED && hasLocalNetwork()) {
             viewModel.startServer()
         }
     }
@@ -202,7 +202,7 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         // never stop mid-session
-        if (!viewModel.runInBackground.value && !isChangingConfigurations &&
+        if (!viewModel.pref(Prefs.RUN_IN_BACKGROUND).value && !isChangingConfigurations &&
             viewModel.serverState.value == AirPlayService.ServerState.RUNNING &&
             viewModel.connectionCount.value == 0) {
             viewModel.stopServer()

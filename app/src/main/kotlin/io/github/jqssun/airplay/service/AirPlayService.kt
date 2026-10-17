@@ -34,6 +34,8 @@ import androidx.media.app.NotificationCompat as MediaNotificationCompat
 import io.github.jqssun.airplay.MainActivity
 import io.github.jqssun.airplay.Prefs
 import io.github.jqssun.airplay.R
+import io.github.jqssun.airplay.changes
+import io.github.jqssun.airplay.get
 import io.github.jqssun.airplay.hasLocalNetwork
 import io.github.jqssun.airplay.realDisplaySize
 import io.github.jqssun.airplay.audio.DacpController
@@ -59,6 +61,7 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 
 data class VideoPlaybackInfo(
@@ -331,30 +334,35 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
                 .debounce(AUDIO_CONFIG_DEBOUNCE_MS)
                 .collect { audioRenderer.updateConfig(it) }
         }
+        lifecycleScope.launch {
+            prefs.changes()
+                .filter { Prefs.all[it]?.restart == true }
+                .debounce(SERVER_RESTART_DEBOUNCE_MS)
+                .collect { _restartServer() }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_START_SERVER) {
             promoteToForeground()
-            val name = prefs.getString(Prefs.SERVER_NAME, Prefs.DEF_SERVER_NAME) ?: Prefs.DEF_SERVER_NAME
-            startServer(name, ensureServiceStarted = false)
+            _startServer(ensureServiceStarted = false)
             if (_serverState.value != ServerState.RUNNING) stopSelf(startId)
         }
         return START_NOT_STICKY
     }
 
-    fun startServer(name: String) {
-        startServer(name, ensureServiceStarted = true)
+    fun startServer() {
+        _startServer(ensureServiceStarted = true)
     }
 
-    private fun startServer(name: String, ensureServiceStarted: Boolean) {
+    private fun _startServer(ensureServiceStarted: Boolean) {
         if (_serverState.value == ServerState.RUNNING) return
         if (!hasLocalNetwork()) {
             log("Local network permission denied")
             _failStart()
             return
         }
-        val effectiveName = name.ifBlank { Prefs.DEF_SERVER_NAME }
+        val effectiveName = prefs[Prefs.SERVER_NAME].ifBlank { Prefs.SERVER_NAME.def }
 
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "airplay:server").apply { acquire() }
@@ -363,8 +371,8 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
 
         val hwAddr = getHwAddr()
         val keyFile = filesDir.resolve("airplay.pem").absolutePath
-        val nohold = prefs.getBoolean(Prefs.ALLOW_NEW_CONN, Prefs.DEF_ALLOW_NEW_CONN)
-        val requirePin = prefs.getBoolean(Prefs.REQUIRE_PIN, Prefs.DEF_REQUIRE_PIN)
+        val nohold = prefs[Prefs.ALLOW_NEW_CONN]
+        val requirePin = prefs[Prefs.REQUIRE_PIN]
 
         // oboe's OpenSL ES backend (pre-AAudio devices, API < 27) can't discover native
         // rate / burst size itself; feed it AudioManager values so low-latency buffer
@@ -383,27 +391,27 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         audioRenderer.attachEngine(nativeHandle)
 
         // apply settings from preferences
-        val maxFps = prefs.getInt(Prefs.MAX_FPS, Prefs.DEF_MAX_FPS)
-        val overscanned = prefs.getBoolean(Prefs.OVERSCANNED, Prefs.DEF_OVERSCANNED)
-        val audioLatencyMs = prefs.getInt(Prefs.AUDIO_LATENCY_MS, Prefs.DEF_AUDIO_LATENCY_MS)
+        val maxFps = prefs[Prefs.MAX_FPS]
+        val overscanned = prefs[Prefs.OVERSCANNED]
+        val audioLatencyMs = prefs[Prefs.AUDIO_LATENCY_MS]
         val (reqW, reqH) = _displaySize(clamp = false)
-        val h265 = videoRenderer.selectDecoders(reqW, reqH, maxFps, prefs.getBoolean(Prefs.H265_ENABLED, Prefs.DEF_H265_ENABLED))
-        val alac = prefs.getBoolean(Prefs.ALAC_ENABLED, Prefs.DEF_ALAC_ENABLED)
-        val aac = prefs.getBoolean(Prefs.AAC_ENABLED, Prefs.DEF_AAC_ENABLED)
+        val h265 = videoRenderer.selectDecoders(reqW, reqH, maxFps, prefs[Prefs.H265_ENABLED])
+        val alac = prefs[Prefs.ALAC_ENABLED]
+        val aac = prefs[Prefs.AAC_ENABLED]
 
-        videoRenderer.enforceSdr = prefs.getBoolean(Prefs.ENFORCE_SDR, Prefs.DEF_ENFORCE_SDR)
-        videoRenderer.keyAllowFrameDrop = prefs.getBoolean(Prefs.KEY_ALLOW_FRAME_DROP, Prefs.DEF_KEY_ALLOW_FRAME_DROP)
-        videoRenderer.selector.maxOperatingRate = when (prefs.getString(Prefs.OPERATING_RATE, Prefs.DEF_OPERATING_RATE)) {
+        videoRenderer.enforceSdr = prefs[Prefs.ENFORCE_SDR]
+        videoRenderer.keyAllowFrameDrop = prefs[Prefs.KEY_ALLOW_FRAME_DROP]
+        videoRenderer.selector.maxOperatingRate = when (prefs[Prefs.OPERATING_RATE]) {
             Prefs.ON -> true; Prefs.OFF -> false; else -> null
         }
-        videoRenderer.benchmarkLog = prefs.getBoolean(Prefs.BENCHMARK_LOG, Prefs.DEF_BENCHMARK_LOG)
+        videoRenderer.benchmarkLog = prefs[Prefs.BENCHMARK_LOG]
         videoRenderer.benchmarkLogCallback = { msg -> logCallback?.invoke(msg) }
-        videoRenderer.scheduledOutputBufferRelease = prefs.getBoolean(Prefs.SCHEDULED_OUTPUT_BUFFER_RELEASE, Prefs.DEF_SCHEDULED_OUTPUT_BUFFER_RELEASE)
+        videoRenderer.scheduledOutputBufferRelease = prefs[Prefs.SCHEDULED_OUTPUT_BUFFER_RELEASE]
         NativeBridge.nativeSetH265Enabled(nativeHandle, h265)
         NativeBridge.nativeSetCodecs(nativeHandle, alac, aac)
-        val advertiseVideo = prefs.getBoolean(Prefs.ADVERTISE_VIDEO, Prefs.DEF_ADVERTISE_VIDEO)
-        val advertiseMirroring = prefs.getBoolean(Prefs.ADVERTISE_MIRRORING, Prefs.DEF_ADVERTISE_MIRRORING)
-        val advertiseAudio = prefs.getBoolean(Prefs.ADVERTISE_AUDIO, Prefs.DEF_ADVERTISE_AUDIO)
+        val advertiseVideo = prefs[Prefs.ADVERTISE_VIDEO]
+        val advertiseMirroring = prefs[Prefs.ADVERTISE_MIRRORING]
+        val advertiseAudio = prefs[Prefs.ADVERTISE_AUDIO]
         NativeBridge.nativeSetHlsEnabled(nativeHandle, advertiseVideo)
         NativeBridge.nativeSetLang(nativeHandle, "", "", resources.configuration.locales.toLanguageTags().replace(',', ':'))
         NativeBridge.nativeSetFeature(nativeHandle, NativeBridge.FT_MIRROR, advertiseMirroring)
@@ -422,7 +430,7 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         _videoAspect.value = w.toFloat() / h
         NativeBridge.nativeSetDisplaySize(nativeHandle, w, h, maxFps)
 
-        val requestedPort = prefs.getInt(Prefs.SERVER_PORT, Prefs.DEF_SERVER_PORT).coerceIn(1, 65535)
+        val requestedPort = prefs[Prefs.SERVER_PORT]
         val port = NativeBridge.nativeStart(nativeHandle, requestedPort)
         if (port < 0) {
             log("Failed to start on port $requestedPort")
@@ -440,7 +448,7 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
             if (advertiseAudio) add(MdnsService(raopName, "_raop._tcp", port, raopTxt))
             add(MdnsService(resolvedName, "_airplay._tcp", port, airplayTxt))
         }
-        if (prefs.getBoolean(Prefs.USB_ONLY, Prefs.DEF_USB_ONLY)) {
+        if (prefs[Prefs.USB_ONLY]) {
             usbAdvertiser = UsbMdnsAdvertiser(services) { iface, addr ->
                 log(if (iface == null) "USB link down" else "USB link up on $iface (${addr?.hostAddress})")
             }.apply { start() }
@@ -457,18 +465,18 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
     }
 
     private fun _orientationFollowsDevice(): Boolean =
-        prefs.getString(Prefs.RESOLUTION, Prefs.DEF_RESOLUTION) == Prefs.AUTO
+        prefs[Prefs.RESOLUTION] == Prefs.AUTO
 
     private fun _displaySize(clamp: Boolean = true): Pair<Int, Int> {
-        val res = prefs.getString(Prefs.RESOLUTION, Prefs.DEF_RESOLUTION)!!
+        val res = prefs[Prefs.RESOLUTION]
         val portrait = when (res) {
-            "portrait" -> true
-            "landscape" -> false
+            Prefs.PORTRAIT -> true
+            Prefs.LANDSCAPE -> false
             else -> resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
         }
         val (rawW, rawH) = realDisplaySize()
         val device = if (portrait != rawH >= rawW) rawH to rawW else rawW to rawH
-        if (res == "portrait" || res == "landscape") return device
+        if (res == Prefs.PORTRAIT || res == Prefs.LANDSCAPE) return device
         val (w, h) = if (res.contains("x")) {
             res.split("x").let { it[0].toInt() to it[1].toInt() }
         } else device
@@ -485,7 +493,7 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         if (nativeHandle == 0L || _serverState.value != ServerState.RUNNING) return
         if (!_orientationFollowsDevice()) return
         val (w, h) = _displaySize()
-        NativeBridge.nativeSetDisplaySize(nativeHandle, w, h, prefs.getInt(Prefs.MAX_FPS, Prefs.DEF_MAX_FPS))
+        NativeBridge.nativeSetDisplaySize(nativeHandle, w, h, prefs[Prefs.MAX_FPS])
         log("Advertising ${w}x${h} from next session")
     }
 
@@ -507,6 +515,20 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
     }
 
     fun stopServer() {
+        _shutdown()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        foregroundStarted = false
+        stopSelf()
+    }
+
+    private fun _restartServer() {
+        if (_serverState.value != ServerState.RUNNING) return
+        _shutdown()
+        _startServer(ensureServiceStarted = false)
+        if (_serverState.value != ServerState.RUNNING) stopSelf()
+    }
+
+    private fun _shutdown() {
         audioRenderer.detachEngine()
         if (nativeHandle != 0L) {
             NativeBridge.nativeStop(nativeHandle)
@@ -536,9 +558,6 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         _serverState.value = ServerState.STOPPED
         _connectionCount.value = 0
         _refreshDacpPlayer()
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        foregroundStarted = false
-        stopSelf()
         log("Server stopped")
     }
 
@@ -1044,11 +1063,11 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
     }
 
     private fun requiresPin(): Boolean {
-        return prefs.getBoolean(Prefs.REQUIRE_PIN, Prefs.DEF_REQUIRE_PIN)
+        return prefs[Prefs.REQUIRE_PIN]
     }
 
     private fun shouldLaunchOnConnect(): Boolean {
-        return prefs.getBoolean(Prefs.LAUNCH_ON_CONNECT, Prefs.DEF_LAUNCH_ON_CONNECT)
+        return prefs[Prefs.LAUNCH_ON_CONNECT]
     }
 
     private fun _buildMediaNotification(): Notification {
@@ -1139,5 +1158,6 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         const val VIDEO_POLL_PENDING_TIMEOUT_MS = 3_000L
 
         private const val AUDIO_CONFIG_DEBOUNCE_MS = 500L
+        private const val SERVER_RESTART_DEBOUNCE_MS = 500L
     }
 }

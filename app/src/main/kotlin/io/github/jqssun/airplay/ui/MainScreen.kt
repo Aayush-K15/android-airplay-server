@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import io.github.jqssun.airplay.Prefs
 import io.github.jqssun.airplay.R
 import io.github.jqssun.airplay.service.AirPlayService.ServerState
 import io.github.jqssun.airplay.ui.gestures.BrightnessState
@@ -101,7 +102,7 @@ fun MainScreen(
     val videoPlaybackActive by viewModel.videoPlaybackActive.collectAsState()
     val videoSessionPending by viewModel.videoSessionPending.collectAsState()
     val mirroringActive by viewModel.mirroringActive.collectAsState()
-    val autoFullscreen by viewModel.autoFullscreen.collectAsState()
+    val autoFullscreen by viewModel.pref(Prefs.AUTO_FULLSCREEN).collectAsState()
 
     // don't use movableContentOf: moving AndroidView across subcomposition boundaries makes it crash on reparent
     val video: @Composable () -> Unit = {
@@ -599,12 +600,12 @@ private fun OverviewContent(
     val localNetwork by viewModel.localNetwork.collectAsState()
     val grant = state != ServerState.RUNNING && localNetwork != LocalNetworkAccess.GRANTED
     val connections by viewModel.connectionCount.collectAsState()
-    val serverName by viewModel.serverName.collectAsState()
+    val serverName by viewModel.pref(Prefs.SERVER_NAME).collectAsState()
     val videoResolution by viewModel.videoResolution.collectAsState()
-    val idlePreview by viewModel.idlePreview.collectAsState()
+    val idlePreview by viewModel.pref(Prefs.IDLE_PREVIEW).collectAsState()
     val mirroringActive by viewModel.mirroringActive.collectAsState()
     val videoPlaybackActive by viewModel.videoPlaybackActive.collectAsState()
-    val debugEnabled by viewModel.debugEnabled.collectAsState()
+    val debugEnabled by viewModel.pref(Prefs.DEBUG_ENABLED).collectAsState()
     val debugInfo by viewModel.debugInfo.collectAsState()
     val tv = isTv()
     val startFocus = remember { FocusRequester() }
@@ -775,7 +776,7 @@ private fun FullscreenVideo(
     onPip: () -> Unit
 ) {
     val videoResolution by viewModel.videoResolution.collectAsState()
-    val debugEnabled by viewModel.debugEnabled.collectAsState()
+    val debugEnabled by viewModel.pref(Prefs.DEBUG_ENABLED).collectAsState()
     val debugInfo by viewModel.debugInfo.collectAsState()
 
     var controlsVisible by remember { mutableStateOf(true) }
