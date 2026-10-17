@@ -12,6 +12,7 @@ fun readAudioConfig(p: SharedPreferences) = AudioConfig(
     percentilePct = Prefs.ADAPTIVE_PERCENTILES[p[Prefs.AUDIO_ADAPTIVE_STEP]],
     oboeBufferFrames = p[Prefs.OBOE_BUFFER_FRAMES],
     forceSwAlac = p[Prefs.FORCE_SW_ALAC],
+    forceSwAac = p[Prefs.FORCE_SW_AAC],
     realtimePriority = p[Prefs.KEY_PRIORITY],
     lowLatency = p[Prefs.LOW_LATENCY],
     benchmarkLog = p[Prefs.BENCHMARK_LOG],

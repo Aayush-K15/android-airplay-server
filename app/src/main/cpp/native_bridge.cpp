@@ -391,13 +391,13 @@ extern "C"
 JNIEXPORT jboolean JNICALL
 Java_io_github_jqssun_airplay_bridge_NativeBridge_nativeServerAudioConfigure(
         JNIEnv *env, jobject thiz, jlong handle, jint cushionMs, jint percentilePct,
-        jint oboeBufferFrames, jboolean forceSwAlac, jboolean realtimePriority, jboolean lowLatency,
-        jboolean benchmarkLog) {
+        jint oboeBufferFrames, jboolean forceSwAlac, jboolean forceSwAac, jboolean realtimePriority,
+        jboolean lowLatency, jboolean benchmarkLog) {
     server_ctx_t *ctx = (server_ctx_t *)(intptr_t)handle;
     if (!ctx || !ctx->cb_ctx.audio_engine) return JNI_FALSE;
     return audio_engine_configure(ctx->cb_ctx.audio_engine, cushionMs, percentilePct,
-                                  oboeBufferFrames, forceSwAlac, realtimePriority, lowLatency,
-                                  benchmarkLog) ? JNI_TRUE : JNI_FALSE;
+                                  oboeBufferFrames, forceSwAlac, forceSwAac, realtimePriority,
+                                  lowLatency, benchmarkLog) ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C"

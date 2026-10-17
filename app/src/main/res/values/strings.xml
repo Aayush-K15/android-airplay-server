@@ -144,7 +144,9 @@
     <string name="setting_enforce_sdr">MediaFormat.KEY_COLOR_TRANSFER</string>
     <string name="setting_enforce_sdr_desc">Tag video as limited SDR; disable to allow HDR sources to pass through</string>
     <string name="setting_sw_alac">Force software ALAC decoder</string>
-    <string name="setting_sw_alac_desc">Always use software ALAC decoder instead of hardware decoder, may affect audio latency</string>
+    <string name="setting_sw_alac_desc">Always use software ALAC decoder instead of system decoder, may affect latency</string>
+    <string name="setting_sw_aac">Force software AAC decoder</string>
+    <string name="setting_sw_aac_desc">Always use software AAC decoder instead of system decoder, may affect latency</string>
 
     <!-- Settings: Developer -->
     <string name="setting_developer_options">Developer options</string>

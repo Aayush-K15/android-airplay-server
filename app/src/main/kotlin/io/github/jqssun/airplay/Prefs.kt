@@ -90,6 +90,7 @@ object Prefs {
     val OBOE_BUFFER_FRAMES = int("oboe_buffer_frames", 0, 0..8192)
     val ALAC_ENABLED = bool("alac_enabled", false, restart = true)
     val FORCE_SW_ALAC = bool("force_sw_alac", true)
+    val FORCE_SW_AAC = bool("force_sw_aac", false)
     val AAC_ENABLED = bool("aac_enabled", true, restart = true)
     val RESOLUTION = str("resolution", AUTO, restart = true) { it in setOf(AUTO, PORTRAIT, LANDSCAPE) || SIZE.matches(it) }
     val MAX_FPS = int("max_fps", 60, 1..Int.MAX_VALUE, restart = true)
